@@ -8,15 +8,17 @@
 
 都市モデル画像の出典は[3D都市モデル（Project PLATEAU）港区（2025年度）](https://www.geospatial.jp/ckan/dataset/plateau-13103-minato-ku-2025)です。データセットの選択可能なライセンスから CC BY 4.0 を選び、CityGML を Unity で可視化して撮影しました。[画像と第三者データの条件](THIRD_PARTY_NOTICES.md)も参照してください。
 
-## 1. できることと確認済みの結果
+## 1. できること
 
-施設を検索するか地図・経緯度で範囲を決め、選択した種類の CityGML を取得できます。取得後は都市別フォルダを公式 SDK に渡します。東京タワー周辺のデータを `v0.1.0` 公開前の候補コミットから公式 SDK 4.3.0 の公開 API で再インポートし、建築物・道路・地形を Scene View と Game View で確認しました。保存したシーンは Unity 再起動後も表示できました。SDK の GUI では都市フォルダの受理まで確認し、範囲指定とインポートは API 経路で検証しています。詳しい条件と限界は[検証記録](Documentation~/validation-upm-2026-09-26.md)と[Issue #3](https://github.com/zabaglione/plateau-area-downloader/issues/3)を参照してください。
+必要な地域とデータの種類を選んで CityGML を取得し、公式 PLATEAU SDK for Unity で都市モデルをインポートできます。
 
-検証環境は Unity `6000.3.10f1`、Universal 3D / URP `17.3.0`、PLATEAU SDK `4.3.0` です。PR #9受け入れ時には Built-in / URP / HDRP で取得済み都市モデルの表示と SDK API インポートを確認しました。検証は macOS で行い、Windows 実機は未検証です。
+- **施設名から地域を探す**：地名や施設名を検索し、候補を選んで周辺の地図へ移動できます。
+- **地図や経緯度で範囲を指定する**：地図上の範囲選択と経緯度の直接入力に対応しています。日付変更線を跨ぐ範囲も指定できます。
+- **必要な種類だけを取得する**：建築物・道路・地形・橋梁など、26種類から対象を選べます。取得済みのデータは再実行時に確認して再利用します。
+- **背景地図を選ぶ**：地理院タイルをそのまま使えるほか、API キーを設定すると Google Maps の道路地図・航空写真・地形に切り替えられます。地理院タイルだけを使う場合、Google への通信やキー設定は不要です。
+- **取得したデータを公式 SDK へ渡す**：取得後に都市フォルダのパスをコピーして SDK を開き、座標系・LOD・テクスチャなどを設定してインポートできます。
 
-`v0.1.2` では検索対象を26種類に拡張し、メニューの再実行時には既存ウィンドウを前面に出して地図を更新します。Unity Editor 上で種類一覧、橋梁の検索、ウィンドウ再利用を確認しました。[検証記録](Documentation~/validation-editor-2026-09-27.md)に条件と結果を記載しています。
-
-`v0.2.0` では Google Maps を任意の地図として追加し、通信失敗時の帰属表示・取消・狭い幅のUIを修正しました。地理院利用時にはGoogle通信やキー設定は不要です。Google関連コードと帰属ロゴは同梱しますが、Google SDKへの依存追加はありません。日付変更線を跨ぐ移動・範囲選択・描画・照会にも対応します。[0.2.0の検証記録](Documentation~/validation-v0.2.0.md)を参照してください。
+Google Maps の利用に Google SDK の追加インストールは不要です。地図の設定方法は[「地図で範囲を選ぶ」](#6-地図で範囲を選ぶ)を参照してください。
 
 ## 2. 必要な環境
 
@@ -24,7 +26,9 @@
 - Git クライアントと、CityGML・地図・施設検索サービスへ接続できる環境。
 - [PLATEAU SDK for Unity `4.3.0`](https://github.com/Project-PLATEAU/PLATEAU-SDK-for-Unity/releases/tag/v4.3.0)。本パッケージより先に導入します。
 
-本パッケージは公式 SDK のメニューを開くため SDK `4.3.0` に依存します。Unity Package Manager はパッケージの `package.json` による Git パッケージ間依存を解決できないため、SDK の `.tgz` を先に導入します。
+公式 SDK は本パッケージと別に導入する必要があります。以下の手順で SDK の `.tgz` を先にインストールしてください。
+
+動作確認は macOS で行っています。Windows 実機での動作は未検証です。確認した環境と検証範囲は[検証記録](Documentation~/validation-v0.2.0.md)を参照してください。
 
 ## 3. 公式 SDK を導入する
 
@@ -37,11 +41,11 @@
 
 [Package Manager の文字を原寸で見る](Documentation~/media/package-manager-sdk-install.png)
 
-### 既知の問題: SDK 4.3.0 の UXML エラー
+### SDK 導入時に Console へエラーが出る場合
 
-公式 SDK `4.3.0` の配布物では、初回アセット取込時に `RoadNetworkEditor.uxml` が未定義の `PLATEAU.Editor.RoadNetwork.RoadNetworkEditMode` を参照し、`TypeLoadException` が Console に出る事例を確認しています。新規プロジェクト 2 件で各 1 回発生し、該当 UXML の強制再インポートでも再現しました。SDK 導入後、本パッケージを加える前から発生し、公式 SDK 側の問題とみられます。SDK 本体は変更していません。Unity 再起動後に Console の件数が 0 でも、初回エラーが解消したとは扱っていません。
+SDK `4.3.0` の導入時に、`RoadNetworkEditor.uxml` や `PLATEAU.Editor.RoadNetwork.RoadNetworkEditMode` を含む `TypeLoadException` が Console に表示されることがあります。この症状は本パッケージを導入していない状態でも発生する、公式 SDK に関する既知の問題です。
 
-詳細と未解決の検証条件は[Issue #2](https://github.com/zabaglione/plateau-area-downloader/issues/2)と[公式 SDK の UXML](https://github.com/Project-PLATEAU/PLATEAU-SDK-for-Unity/blob/v4.3.0/Resources/PlateauUIDocument/RoadNetwork/RoadNetworkEditor.uxml#L16)を参照してください。
+このエラーが出た場合は、[症状と対応状況（Issue #2）](https://github.com/zabaglione/plateau-area-downloader/issues/2)を確認してください。現時点で確実な解消手順は案内できません。Unity の再起動後に Console のエラー表示が消えても、原因が解消したとは限りません。SDK の操作が進められない場合は、エラー内容を控えて公式 SDK のサポート情報も確認してください。
 
 ## 4. 本パッケージを導入する
 
@@ -53,13 +57,11 @@ https://github.com/zabaglione/plateau-area-downloader.git#v0.2.0
 
 導入後は **Tools → PLATEAU Area Downloader** から開きます。メニューを再実行すると開いているウィンドウを前面に出し、地図を再描画します。[Unity の Git URL 導入手順](https://docs.unity3d.com/ja/6000.0/Manual/upm-ui-giturl.html)も参照できます。
 
-`v0.1.0` 公開前には別の一時プロジェクトで、公式 SDK の tarball を先に追加し、本ツールの非公開 Git URL を後から追加する二段階導入に成功しました。Package Manager は本ツールを `Git` 取得元として表示しました。[導入の検証記録](Documentation~/validation-upm-2026-09-26.md)を参照してください。
-
-![公開前の候補SHAから本ツールをGit URLで導入したPackage Manager](Documentation~/media/package-manager-git-install.png)
+![本パッケージをGit URLで導入したPackage Managerの参考画面](Documentation~/media/package-manager-git-install.png)
 
 [Package Manager の文字を原寸で見る](Documentation~/media/package-manager-git-install.png)
 
-画像の導入元は `v0.1.0` 公開前の候補コミット `6774dee` です。`v0.1.2` の導入結果を示す画像ではありません。
+画像は `v0.1.0` 公開前の候補コミット `6774dee` を導入した参考画面です。現在のリリースとはバージョン表示が異なります。
 
 ## 5. 施設を検索する
 
@@ -123,9 +125,9 @@ Windows でのフォルダ選択は実機未検証です。
 
 本パッケージのボタンはインポート設定やインポート処理を行いません。公式 SDK では、インポート形式と基準座標系を選び、「範囲選択」で対象の地域メッシュを指定し、範囲選択画面の「決定」を押します。元のシーンで種類・LOD・テクスチャなどを確認して「モデルをインポート」を押します。詳しくは[公式 SDK 4.3.0 のインポート手順](https://github.com/Project-PLATEAU/PLATEAU-SDK-for-Unity/blob/v4.3.0/Documentation~/manual/ImportCityModels.md)と[図付きの操作ガイド](Documentation~/user-guide.md)を参照してください。
 
-本ガイドの動画と画像が示す SDK の GUI 操作は都市フォルダを受け付けるところまでです。`v0.1.0` 公開前の候補から取得したデータのインポート完了と再起動後の表示は、SDK の公開 API 経由で検証しました。GUI の「モデルをインポート」完了までは実操作で確認していません。
+操作動画では、公式 SDK に都市フォルダを指定するところまでを紹介しています。その後の範囲選択やインポート設定は、上記の公式 SDK の手順に沿って進めてください。
 
-インポート後は Scene View と Game View で建築物・道路・地形を確認します。Hierarchy でモデル、Inspector で参照やマテリアルを確認し、Console に Error / Exception / Assert がないか、Missing Script、欠落マテリアル、ピンク表示がないか点検してください。`v0.1.0` 公開前の候補での保存と Unity 再起動後の結果は[検証記録](Documentation~/validation-upm-2026-09-26.md)に記載しています。
+インポート後は Scene View と Game View で建築物・道路・地形を確認します。Hierarchy でモデル、Inspector で参照やマテリアルを確認し、Console に Error / Exception / Assert がないか、Missing Script、欠落マテリアル、ピンク表示がないか点検してください。表示を確認したらシーンを保存してください。
 
 ![公式SDKから取り込んだ港区の都市モデルをUnity Scene Viewで表示した状態](Documentation~/media/scene-view-city-model.png)
 
@@ -134,8 +136,8 @@ Windows でのフォルダ選択は実機未検証です。
 | 状況 | 確認すること |
 | --- | --- |
 | SDK のメニューが出ない | 公式 SDK `.tgz` を先に導入し、Package Manager に表示されるか確認します。 |
-| SDK 4.3.0 の UXML `TypeLoadException` | 上記の[既知の問題](#既知の問題-sdk-430-の-uxml-エラー)を確認します。Issue #2 に記録した未解決の公式 SDK エラーです。 |
-| Git URL の導入に失敗する | Git の導入、URL、非公開段階なら GitHub へのアクセス権を確認します。SDK `.tgz` を先に導入してください。 |
+| SDK 4.3.0 の UXML `TypeLoadException` | 上記の[SDK 導入時のエラー案内](#sdk-導入時に-console-へエラーが出る場合)で、症状と対応状況を確認します。 |
+| Git URL の導入に失敗する | Git がインストールされているか、URL が正しいか、GitHub に接続できるかを確認します。SDK `.tgz` を先に導入してください。 |
 | 施設検索や地図が表示されない | 接続先とネットワークを確認し、経緯度入力で範囲を指定します。 |
 | 対象が多い・容量上限を超える | 範囲を狭めるか種類を減らし、「CityGMLファイルを検索」から再実行します。 |
 | 中断後も保存先に一時ファイルがある | 次回同じジョブを実行してください。削除できない場合は Console の警告を確認します。 |
