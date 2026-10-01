@@ -203,16 +203,22 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
 
         internal static async Task<CatalogCity[]> SearchCityGmlAsync(
             double west, double south, double east, double north,
-            IEnumerable<string> types, string apiBase, CancellationToken token)
+            IEnumerable<string> types, string apiBase, CancellationToken token, HttpClient suppliedClient = null)
         {
             var selectedTypes = types.Distinct().ToArray();
             if (selectedTypes.Length == 0) return Array.Empty<CatalogCity>();
-            var c = CultureInfo.InvariantCulture;
-            var extent = string.Join(",", new[] { west, south, east, north }.Select(v => v.ToString("R", c)));
-            var url = apiBase.TrimEnd('/') + "/datacatalog/citygml/r:" + extent +
-                      "?types=" + string.Join(",", selectedTypes);
-            var json = await GetStringAsync(url, token);
-            return JsonUtility.FromJson<CatalogResponse>(json)?.cities ?? Array.Empty<CatalogCity>();
+            var results = new List<CatalogCity>();
+            foreach (var part in new GeoBounds(west, south, east, north).SplitAtAntimeridian())
+            {
+                var c = CultureInfo.InvariantCulture;
+                var extent = string.Join(",", new[] { part.West, part.South, part.East, part.North }
+                    .Select(v => v.ToString("R", c)));
+                var url = apiBase.TrimEnd('/') + "/datacatalog/citygml/r:" + extent +
+                          "?types=" + string.Join(",", selectedTypes);
+                var json = await GetStringAsync(url, token, suppliedClient);
+                results.AddRange(JsonUtility.FromJson<CatalogResponse>(json)?.cities ?? Array.Empty<CatalogCity>());
+            }
+            return results.ToArray();
         }
 
         internal static async Task<string> CreatePackAsync(string[] urls, string apiBase, CancellationToken token)
@@ -316,21 +322,21 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             return body;
         }
 
-        private static async Task<string> GetStringAsync(string url, CancellationToken token)
+        private static async Task<string> GetStringAsync(string url, CancellationToken token, HttpClient suppliedClient = null)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            using var response = await SendWithThrottleAsync(request, token);
+            using var response = await SendWithThrottleAsync(request, token, suppliedClient);
             var body = await response.Content.ReadAsStringAsync();
             if (!response.IsSuccessStatusCode) throw new HttpRequestException("HTTP " + (int)response.StatusCode + " for " + url);
             return body;
         }
 
-        private static async Task<HttpResponseMessage> SendWithThrottleAsync(HttpRequestMessage request, CancellationToken token)
+        private static async Task<HttpResponseMessage> SendWithThrottleAsync(HttpRequestMessage request, CancellationToken token, HttpClient suppliedClient = null)
         {
             for (var attempt = 0; attempt < 3; attempt++)
             {
                 using var retry = CloneRequest(request);
-                var response = await Client.SendAsync(retry, HttpCompletionOption.ResponseContentRead, token);
+                var response = await (suppliedClient ?? Client).SendAsync(retry, HttpCompletionOption.ResponseContentRead, token);
                 if (response.StatusCode != (HttpStatusCode)429 || attempt == 2) return response;
                 var delay = response.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(3 * (attempt + 1));
                 response.Dispose();

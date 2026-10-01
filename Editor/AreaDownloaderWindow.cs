@@ -47,11 +47,11 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 (0.5 - Math.Log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale);
         }
 
-        internal static (double latitude, double longitude) FromWorld(double x, double y, double zoom)
+        internal static (double latitude, double longitude) FromWorld(double x, double y, double zoom, bool normalizeLongitude = true)
         {
             var scale = WorldScale(zoom);
             return (Math.Atan(Math.Sinh(Math.PI * (1 - 2 * y / scale))) * 180 / Math.PI,
-                x / scale * 360 - 180);
+                normalizeLongitude ? GeoBounds.NormalizeLongitude(x / scale * 360 - 180) : x / scale * 360 - 180);
         }
     }
 
@@ -402,7 +402,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 bounds = new GeoBounds(Q<DoubleField>("west").value, Q<DoubleField>("south").value,
                     Q<DoubleField>("east").value, Q<DoubleField>("north").value);
                 centerLatitude = (bounds.South + bounds.North) / 2;
-                centerLongitude = (bounds.West + bounds.East) / 2;
+                centerLongitude = bounds.CenterLongitude;
                 InvalidatePreview();
                 RefreshMap();
             }
@@ -698,7 +698,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 var b = ScreenToGeo(end);
                 if (Math.Abs(end.x - pointerStart.x) > 5 && Math.Abs(end.y - pointerStart.y) > 5)
                 {
-                    bounds = new GeoBounds(Math.Min(a.longitude, b.longitude), Math.Min(a.latitude, b.latitude),
+                    bounds = GeoBounds.FromUnwrapped(Math.Min(a.longitude, b.longitude), Math.Min(a.latitude, b.latitude),
                         Math.Max(a.longitude, b.longitude), Math.Max(a.latitude, b.latitude));
                     WriteBounds();
                     InvalidatePreview();
@@ -767,14 +767,16 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         private (double latitude, double longitude) ScreenToGeo(Vector2 point)
         {
             var center = ToWorld(centerLatitude, centerLongitude);
-            return FromWorld(center.x + point.x - map.contentRect.width / 2,
-                center.y + point.y - map.contentRect.height / 2);
+            // Keep endpoints in the same world copy while selecting a rectangle or computing a viewport.
+            return MapZoomMath.FromWorld(center.x + point.x - map.contentRect.width / 2,
+                center.y + point.y - map.contentRect.height / 2, zoom, normalizeLongitude: false);
         }
 
         private Vector2 GeoToScreen(double latitude, double longitude)
         {
             var center = ToWorld(centerLatitude, centerLongitude);
-            var point = ToWorld(latitude, longitude);
+            var nearLongitude = centerLongitude + GeoBounds.NormalizeLongitude(longitude - centerLongitude);
+            var point = ToWorld(latitude, nearLongitude);
             return new Vector2((float)(point.x - center.x + map.contentRect.width / 2),
                 (float)(point.y - center.y + map.contentRect.height / 2));
         }
@@ -976,9 +978,10 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             {
                 var northWest = ScreenToGeo(Vector2.zero);
                 var southEast = ScreenToGeo(new Vector2(map.contentRect.width, map.contentRect.height));
+                var viewport = GeoBounds.FromUnwrapped(northWest.longitude, southEast.latitude,
+                    southEast.longitude, northWest.latitude);
                 url = GoogleMapTiles.ViewportUrl(task.Result.session, GoogleApiKey, MapZoomMath.TileZoom(zoom),
-                    Math.Max(-180, northWest.longitude), southEast.latitude,
-                    Math.Min(180, southEast.longitude), northWest.latitude);
+                    viewport.West, viewport.South, viewport.East, viewport.North);
             }
             if (url != attributionViewportUrl)
             {
@@ -1186,8 +1189,23 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 new Color(0.1f, 0.55f, 1f, 1f));
         }
 
-        private void DrawGeoRect(VisualElement parent, GeoBounds geo, Color fill, Color stroke, float width = 2) =>
-            DrawScreenRect(parent, GeoToScreen(geo.North, geo.West), GeoToScreen(geo.South, geo.East), fill, stroke, width);
+        private void DrawGeoRect(VisualElement parent, GeoBounds geo, Color fill, Color stroke, float width = 2)
+        {
+            var center = ToWorld(centerLatitude, centerLongitude);
+            var nearCenter = centerLongitude + GeoBounds.NormalizeLongitude(geo.CenterLongitude - centerLongitude);
+            var west = ToWorld(geo.North, nearCenter - geo.LongitudeSpan * 0.5);
+            var east = ToWorld(geo.South, nearCenter + geo.LongitudeSpan * 0.5);
+            var worldWidth = MapZoomMath.WorldScale(zoom);
+            // Draw every world copy intersecting the viewport, keeping narrow crossing selections narrow.
+            var firstCopy = (int)Math.Ceiling((center.x - map.contentRect.width / 2 - east.x) / worldWidth);
+            var lastCopy = (int)Math.Floor((center.x + map.contentRect.width / 2 - west.x) / worldWidth);
+            for (var copy = firstCopy; copy <= lastCopy; copy++)
+                DrawScreenRect(parent,
+                    new Vector2((float)(west.x + copy * worldWidth - center.x + map.contentRect.width / 2),
+                        (float)(west.y - center.y + map.contentRect.height / 2)),
+                    new Vector2((float)(east.x + copy * worldWidth - center.x + map.contentRect.width / 2),
+                        (float)(east.y - center.y + map.contentRect.height / 2)), fill, stroke, width);
+        }
 
         private static void DrawScreenRect(VisualElement parent, Vector2 a, Vector2 b, Color fill, Color stroke,
             float width = 2)

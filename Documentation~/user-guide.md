@@ -16,7 +16,7 @@
 
 ## 2. 必要な環境
 
-Unity `6000.3.10f1` 以降を使います。確認済みの構成は Universal 3D / URP `17.3.0` と公式 SDK `4.3.0` です。HDRP は使っていません。Git クライアントとネットワーク接続も必要です。
+Unity `6000.3.10f1` 以降を使います。確認済みの構成は Universal 3D / URP `17.3.0` と公式 SDK `4.3.0` です。掲載した過去の画面例はURPです。0.2.0候補のEditModeテストはBuilt-in / URP / HDRPでも確認しています。Git クライアントとネットワーク接続も必要です。
 
 ## 3. 公式 SDK を先に導入する
 
@@ -33,7 +33,7 @@ Unity `6000.3.10f1` 以降を使います。確認済みの構成は Universal 3
 公式 SDK の後、Package Manager の **＋ → Install package from git URL...** に次の URL を入力します。
 
 ```text
-https://github.com/zabaglione/plateau-area-downloader.git#v0.1.2
+https://github.com/zabaglione/plateau-area-downloader.git#v0.2.0
 ```
 
 導入後は **Tools → PLATEAU Area Downloader** を開きます。同じメニューを再実行すると、開いているウィンドウを前面に出して地図を更新します。選択中の種類と検索結果は保持されます。
@@ -140,3 +140,9 @@ PLATEAUData~/
 - インポート後に表示されない：SDK の範囲、LOD、座標系、種類、Scene / Game View、Console を確認します。
 
 画像と動画は2026-09-26に macOS 上の Unity 実画面から取得・編集しました。地図画像は地理院タイル（国土地理院）、施設検索結果は Photon / © OpenStreetMap contributors です。詳しい出典と利用条件は[メディアについて](media/README.md)と[第三者サービスとデータ](../THIRD_PARTY_NOTICES.md)を参照してください。
+
+## 日付変更線を跨ぐ範囲
+
+0.2.0では日付変更線を跨ぐ地図移動・Shift＋ドラッグに対応します。座標入力では、西経度 `179.9`、東経度 `-179.9` のように指定します。西経度が東経度より大きい範囲は日付変更線を跨ぎます。CityGML照会は両側へ分割されますが、PLATEAUの提供地域が増えるわけではありません。
+
+Google関連コードと帰属ロゴは本体に同梱します。地理院利用時はGoogleへの通信・キー設定が不要で、Google Mapsを選ぶと設定とロゴを初期化します。

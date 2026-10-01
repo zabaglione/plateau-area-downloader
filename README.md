@@ -10,15 +10,17 @@
 
 ## 1. できることと確認済みの結果
 
-施設を検索するか地図・経緯度で範囲を決め、選択した種類の CityGML を取得できます。取得後は都市別フォルダを公式 SDK に渡します。東京タワー周辺のデータを `v0.1.0` 公開前の候補コミットから公式 SDK 4.3.0 の公開 API で再インポートし、建築物・道路・地形を Scene View と Game View で確認しました。保存したシーンは Unity 再起動後も表示できました。SDK の GUI では都市フォルダの受理まで確認し、範囲指定とインポートは API 経路で検証しています。詳しい条件と限界は[検証記録](Documentation~/validation-urp-2026-09-26.md)と[Issue #3](https://github.com/zabaglione/plateau-area-downloader/issues/3)を参照してください。
+施設を検索するか地図・経緯度で範囲を決め、選択した種類の CityGML を取得できます。取得後は都市別フォルダを公式 SDK に渡します。東京タワー周辺のデータを `v0.1.0` 公開前の候補コミットから公式 SDK 4.3.0 の公開 API で再インポートし、建築物・道路・地形を Scene View と Game View で確認しました。保存したシーンは Unity 再起動後も表示できました。SDK の GUI では都市フォルダの受理まで確認し、範囲指定とインポートは API 経路で検証しています。詳しい条件と限界は[検証記録](Documentation~/validation-upm-2026-09-26.md)と[Issue #3](https://github.com/zabaglione/plateau-area-downloader/issues/3)を参照してください。
 
-検証環境は Unity `6000.3.10f1`、Universal 3D / URP `17.3.0`、PLATEAU SDK `4.3.0` です。HDRP は導入していません。検証は macOS で行い、Windows 実機は未検証です。
+検証環境は Unity `6000.3.10f1`、Universal 3D / URP `17.3.0`、PLATEAU SDK `4.3.0` です。PR #9受け入れ時には Built-in / URP / HDRP で取得済み都市モデルの表示と SDK API インポートを確認しました。検証は macOS で行い、Windows 実機は未検証です。
 
 `v0.1.2` では検索対象を26種類に拡張し、メニューの再実行時には既存ウィンドウを前面に出して地図を更新します。Unity Editor 上で種類一覧、橋梁の検索、ウィンドウ再利用を確認しました。[検証記録](Documentation~/validation-editor-2026-09-27.md)に条件と結果を記載しています。
 
+`v0.2.0` では Google Maps を任意の地図として追加し、通信失敗時の帰属表示・取消・狭い幅のUIを修正しました。地理院利用時にはGoogle通信やキー設定は不要です。Google関連コードと帰属ロゴは同梱しますが、Google SDKへの依存追加はありません。日付変更線を跨ぐ移動・範囲選択・描画・照会にも対応します。[0.2.0の検証記録](Documentation~/validation-v0.2.0.md)を参照してください。
+
 ## 2. 必要な環境
 
-- Unity `6000.3.10f1` 以降。確認済み構成は Universal 3D / URP `17.3.0` です。
+- Unity `6000.3.10f1` 以降。検証構成は Built-in、URP `17.3.0`、HDRP `17.3.0` です。
 - Git クライアントと、CityGML・地図・施設検索サービスへ接続できる環境。
 - [PLATEAU SDK for Unity `4.3.0`](https://github.com/Project-PLATEAU/PLATEAU-SDK-for-Unity/releases/tag/v4.3.0)。本パッケージより先に導入します。
 
@@ -46,7 +48,7 @@
 公式 SDK の後に、Package Manager の **＋ → Install package from git URL...** を選び、次の URL を指定します。
 
 ```text
-https://github.com/zabaglione/plateau-area-downloader.git#v0.1.2
+https://github.com/zabaglione/plateau-area-downloader.git#v0.2.0
 ```
 
 導入後は **Tools → PLATEAU Area Downloader** から開きます。メニューを再実行すると開いているウィンドウを前面に出し、地図を再描画します。[Unity の Git URL 導入手順](https://docs.unity3d.com/ja/6000.0/Manual/upm-ui-giturl.html)も参照できます。
@@ -67,7 +69,7 @@ https://github.com/zabaglione/plateau-area-downloader.git#v0.1.2
 
 ## 6. 地図で範囲を選ぶ
 
-地図をドラッグして移動し、ホイールまたはトラックパッドの縦スクロールで拡大縮小します。「拡大縮小の速さ」は同じ端末の Unity Editor 設定に保存されます。**Shift＋ドラッグ**で青い指定範囲を描きます。経緯度を直接入力したときは「反映」を押してください。
+地図をドラッグして移動し、ホイールまたはトラックパッドの縦スクロールで拡大縮小します。「拡大縮小の速さ」は同じ端末の Unity Editor 設定に保存されます。**Shift＋ドラッグ**で青い指定範囲を描きます。経緯度を直接入力したときは「反映」を押してください。日付変更線を跨ぐ範囲は、例えば西経度 `179.9`、東経度 `-179.9` と入力します。西経度が東経度より大きいときは、日付変更線を跨ぐ範囲として扱います。
 
 背景地図は既定で地理院タイルです。「表示する地図」で Google Maps（道路地図・航空写真・地形）に切り替えられます。Google Maps を使うには、Google Cloud で課金を有効にしたプロジェクトの [Map Tiles API](https://developers.google.com/maps/documentation/tile) を有効化し、その API キーを「接続先」の「Google Maps API キー」に入力します。タイル取得には Google の料金がかかります。キーは同じ端末の Unity Editor 設定に平文で保存され、プロジェクトには保存されません。
 
@@ -123,7 +125,7 @@ Windows でのフォルダ選択は実機未検証です。
 
 本ガイドの動画と画像が示す SDK の GUI 操作は都市フォルダを受け付けるところまでです。`v0.1.0` 公開前の候補から取得したデータのインポート完了と再起動後の表示は、SDK の公開 API 経由で検証しました。GUI の「モデルをインポート」完了までは実操作で確認していません。
 
-インポート後は Scene View と Game View で建築物・道路・地形を確認します。Hierarchy でモデル、Inspector で参照やマテリアルを確認し、Console に Error / Exception / Assert がないか、Missing Script、欠落マテリアル、ピンク表示がないか点検してください。`v0.1.0` 公開前の候補での保存と Unity 再起動後の結果は[検証記録](Documentation~/validation-urp-2026-09-26.md)に記載しています。
+インポート後は Scene View と Game View で建築物・道路・地形を確認します。Hierarchy でモデル、Inspector で参照やマテリアルを確認し、Console に Error / Exception / Assert がないか、Missing Script、欠落マテリアル、ピンク表示がないか点検してください。`v0.1.0` 公開前の候補での保存と Unity 再起動後の結果は[検証記録](Documentation~/validation-upm-2026-09-26.md)に記載しています。
 
 ![公式SDKから取り込んだ港区の都市モデルをUnity Scene Viewで表示した状態](Documentation~/media/scene-view-city-model.png)
 
