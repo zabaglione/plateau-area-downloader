@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 
 namespace Zabaglione.PlateauAreaDownloader.Editor
 {
@@ -40,11 +41,6 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 throw new ArgumentOutOfRangeException(nameof(north), "Latitude must be finite and between -90 and 90 degrees.");
             }
 
-            if (west > east)
-            {
-                throw new ArgumentException("West must not be east of east.", nameof(west));
-            }
-
             if (south > north)
             {
                 throw new ArgumentException("South must not be north of north.", nameof(south));
@@ -56,7 +52,46 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             North = north;
         }
 
-        /// <summary>True when this value contains finite coordinates in geographic order.</summary>
+        /// <summary>West greater than east represents a rectangle crossing the antimeridian.</summary>
+        public bool CrossesAntimeridian => West > East;
+        public double LongitudeSpan => CrossesAntimeridian ? East - West + 360.0 : East - West;
+        public double CenterLongitude => NormalizeLongitude(West + LongitudeSpan * 0.5);
+
+        /// <summary>Wraps a finite longitude into [-180, 180).</summary>
+        public static double NormalizeLongitude(double longitude)
+        {
+            if (!IsFinite(longitude)) throw new ArgumentOutOfRangeException(nameof(longitude));
+            var wrapped = longitude % 360.0;
+            if (wrapped < -180.0) wrapped += 360.0;
+            if (wrapped >= 180.0) wrapped -= 360.0;
+            return wrapped;
+        }
+
+        /// <summary>Creates bounds from ordered, potentially unwrapped longitude endpoints.</summary>
+        public static GeoBounds FromUnwrapped(double west, double south, double east, double north)
+        {
+            if (!IsFinite(west) || !IsFinite(east) || east < west)
+                throw new ArgumentException("Unwrapped longitudes must be finite and ordered.");
+            var span = east - west;
+            if (span >= 360.0) return new GeoBounds(-180.0, south, 180.0, north);
+            var normalizedWest = NormalizeLongitude(west);
+            var normalizedEast = NormalizeLongitude(east);
+            // Preserve the eastern edge at +180 without turning a zero-width seam into the whole world.
+            if (normalizedEast == -180.0 && span > 0) normalizedEast = 180.0;
+            return new GeoBounds(normalizedWest, south, normalizedEast, north);
+        }
+
+        /// <summary>Returns one or two ordered rectangles suitable for APIs requiring west less than east.</summary>
+        public GeoBounds[] SplitAtAntimeridian()
+        {
+            Validate();
+            if (!CrossesAntimeridian) return new[] { this };
+            if (LongitudeSpan == 0) return new[] { new GeoBounds(West, South, West, North) };
+            return new[] { new GeoBounds(West, South, 180.0, North), new GeoBounds(-180.0, South, East, North) }
+                .Where(part => part.LongitudeSpan > 0).ToArray();
+        }
+
+        /// <summary>True when this value contains finite geographic coordinates.</summary>
         public bool IsValid
         {
             get
@@ -66,7 +101,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                     && East >= MinimumLongitude && East <= MaximumLongitude
                     && South >= MinimumLatitude && South <= MaximumLatitude
                     && North >= MinimumLatitude && North <= MaximumLatitude
-                    && West <= East && South <= North;
+                    && South <= North;
             }
         }
 
@@ -75,7 +110,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         {
             if (!IsValid)
             {
-                throw new ArgumentException("Geo bounds must contain finite, ordered geographic coordinates.");
+                throw new ArgumentException("Geo bounds must contain finite geographic coordinates and ordered latitudes.");
             }
         }
 
@@ -115,23 +150,28 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
 
             double halfLatitudeSpan = (sideLengthMeters / meridionalRadius) * 0.5;
             double halfLongitudeSpan = (sideLengthMeters / eastWestScale) * 0.5;
-            return new GeoBounds(
+            return FromUnwrapped(
                 longitude - ToDegrees(halfLongitudeSpan),
-                latitude - ToDegrees(halfLatitudeSpan),
+                Math.Max(MinimumLatitude, latitude - ToDegrees(halfLatitudeSpan)),
                 longitude + ToDegrees(halfLongitudeSpan),
-                latitude + ToDegrees(halfLatitudeSpan));
+                Math.Min(MaximumLatitude, latitude + ToDegrees(halfLatitudeSpan)));
         }
 
         /// <summary>Tests whether a latitude/longitude point is inside this rectangle.</summary>
         public bool Contains(double latitude, double longitude, bool includeBoundary = true)
         {
             Validate();
-            if (includeBoundary)
-            {
-                return latitude >= South && latitude <= North && longitude >= West && longitude <= East;
-            }
+            if (!IsFinite(latitude) || !IsFinite(longitude)) return false;
+            return (includeBoundary ? latitude >= South && latitude <= North : latitude > South && latitude < North)
+                && ContainsLongitude(longitude, includeBoundary);
+        }
 
-            return latitude > South && latitude < North && longitude > West && longitude < East;
+        private bool ContainsLongitude(double longitude, bool includeBoundary)
+        {
+            if (LongitudeSpan >= 360.0) return true;
+            var offset = NormalizeLongitude(longitude - West);
+            if (offset < 0) offset += 360.0;
+            return includeBoundary ? offset <= LongitudeSpan : offset > 0 && offset < LongitudeSpan;
         }
 
         /// <summary>Tests whether two rectangles overlap, optionally counting touching edges.</summary>
@@ -139,14 +179,13 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         {
             Validate();
             other.Validate();
-            if (includeBoundary)
-            {
-                return West <= other.East && East >= other.West
-                    && South <= other.North && North >= other.South;
-            }
-
-            return West < other.East && East > other.West
-                && South < other.North && North > other.South;
+            if (includeBoundary ? South > other.North || North < other.South : South >= other.North || North <= other.South)
+                return false;
+            foreach (var a in SplitAtAntimeridian())
+            foreach (var b in other.SplitAtAntimeridian())
+                if (includeBoundary ? a.West <= b.East && a.East >= b.West : a.West < b.East && a.East > b.West)
+                    return true;
+            return includeBoundary && ContainsLongitude(180.0, true) && other.ContainsLongitude(180.0, true);
         }
 
         public bool Equals(GeoBounds other)
@@ -272,6 +311,8 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         public static IEnumerable<string> EnumerateIntersecting(GeoBounds bounds, bool includeBoundary = true)
         {
             bounds.Validate();
+            if (bounds.CrossesAntimeridian)
+                return bounds.SplitAtAntimeridian().SelectMany(part => EnumerateIntersecting(part, includeBoundary)).Distinct();
 
             double minimumRowValue = SnapMeshBoundary(bounds.South * RowsPerDegree);
             double maximumRowValue = SnapMeshBoundary(bounds.North * RowsPerDegree);

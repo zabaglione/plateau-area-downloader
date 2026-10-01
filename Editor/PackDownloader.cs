@@ -107,7 +107,8 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 maxLod = item.gml.maxLod,
                 url = item.gml.url,
                 fileSize = item.gml.fileSize
-            }).OrderBy(item => item.url, StringComparer.Ordinal).ToArray();
+            }).GroupBy(item => item.url, StringComparer.Ordinal).Select(group => group.First())
+                .OrderBy(item => item.url, StringComparer.Ordinal).ToArray();
             if (entries.Length == 0) throw new InvalidOperationException("No CityGML files selected.");
             var metadata = selection.SelectMany(item => item.city.metadataZipUrls ?? Array.Empty<string>())
                 .Distinct(StringComparer.Ordinal).OrderBy(url => url, StringComparer.Ordinal).ToArray();

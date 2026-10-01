@@ -88,7 +88,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor.Tests
         [Test]
         public void GeoBounds_RejectsInvalidRanges()
         {
-            Assert.Throws<ArgumentException>(() => new GeoBounds(140.0, 36.0, 139.0, 35.0));
+            Assert.Throws<ArgumentException>(() => new GeoBounds(139.0, 36.0, 140.0, 35.0));
             Assert.Throws<ArgumentOutOfRangeException>(() => new GeoBounds(-181.0, 35.0, 139.0, 36.0));
             Assert.Throws<ArgumentOutOfRangeException>(() => GeoBounds.FromCenter(35.0, 139.0, 0.0));
         }
