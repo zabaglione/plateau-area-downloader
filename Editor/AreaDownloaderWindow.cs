@@ -88,6 +88,24 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         private bool selecting;
         private bool pointerActive;
         private HashSet<string> neededTileKeys = new HashSet<string>();
+        private string mapProvider = "gsi";
+        private string googleMapType = "roadmap";
+        private Task<GoogleTileSession> googleSessionTask;
+        private string googleSessionIdentity;
+        private DateTimeOffset googleSessionFailedAt;
+        private CancellationTokenSource googleCancellation;
+        private bool googleControlsInitialized;
+        private IVisualElementScheduledItem attributionUpdate;
+        private int attributionGeneration;
+        private CancellationTokenSource attributionCancellation;
+        private string attributionViewportUrl;
+        private bool attributionReady;
+        private bool attributionRequestPending;
+        private bool attributionUpdateScheduled;
+        // Per-window dependencies keep asynchronous map behavior testable without changing saved settings.
+        internal Func<string, string, CancellationToken, Task<GoogleTileSession>> CreateGoogleSession;
+        internal Func<string, CancellationToken, Task<string>> FetchGoogleCopyright;
+        internal Func<string, CancellationToken, Task<byte[]>> FetchTile = PlateauApi.GetTileAsync;
         private int previewGeneration;
         private string placeName = "東京タワー";
         [SerializeField] private bool includeBuildings = true;
@@ -100,6 +118,9 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         private string downloadedDataRoot;
         private VisualElement map;
         private VisualElement tiles;
+        private VisualElement googleLogo;
+        private Label mapMessage;
+        private Label mapAttribution;
         private VisualElement meshOverlay;
         private VisualElement boundsOverlay;
         private VisualElement candidates;
@@ -130,6 +151,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             if (map == null || map.panel == null) return;
             foreach (var request in tileRequests.Values) request.Cancellation.Cancel();
             tileRequests.Clear();
+            if (googleSessionTask != null && googleSessionTask.IsFaulted) googleSessionTask = null;
             RefreshMap();
             UpdateDownloadSelection();
             Repaint();
@@ -153,6 +175,8 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             operation?.Dispose();
             foreach (var request in tileRequests.Values) request.Cancellation.Cancel();
             tileRequests.Clear();
+            CancelAttribution();
+            CancelGoogleSession();
             foreach (var texture in tileTextures.Values)
                 if (texture != null) DestroyImmediate(texture);
             tileTextures.Clear();
@@ -161,6 +185,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
 
         public void CreateGUI()
         {
+            CancelAttribution();
             if (!hasSelectionState)
             {
                 previewGeneration++;
@@ -168,6 +193,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 hasSelectionState = true;
             }
             rootVisualElement.Clear();
+            googleControlsInitialized = false;
             var layout = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(PackagePath + "AreaWindow.uxml");
             if (layout == null)
             {
@@ -188,6 +214,9 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 rootVisualElement.style.unityFontDefinition = new StyleFontDefinition(japaneseFont);
             map = Q<VisualElement>("map");
             tiles = Q<VisualElement>("tiles");
+            googleLogo = Q<VisualElement>("google-logo");
+            mapMessage = Q<Label>("map-message");
+            mapAttribution = Q<Label>("map-attribution");
             meshOverlay = Q<VisualElement>("mesh-overlay");
             boundsOverlay = Q<VisualElement>("bounds-overlay");
             candidates = Q<VisualElement>("candidates");
@@ -222,7 +251,18 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 EditorPrefs.SetInt(Prefs + "zoomSensitivity", zoomSensitivityPercent);
             });
             Q<Button>("map-source-link").clicked += () =>
-                Application.OpenURL("https://maps.gsi.go.jp/development/ichiran.html");
+                Application.OpenURL(UseGoogle ? GoogleMapTiles.TermsUrl : "https://maps.gsi.go.jp/development/ichiran.html");
+            mapProvider = EditorPrefs.GetString(Prefs + "mapProvider", "gsi") == "google" ? "google" : "gsi";
+            var provider = Q<DropdownField>("map-provider");
+            provider.choices = new List<string> { "地理院タイル", "Google Maps" };
+            provider.SetValueWithoutNotify(UseGoogle ? "Google Maps" : "地理院タイル");
+            provider.RegisterValueChangedCallback(e =>
+            {
+                mapProvider = e.newValue == "Google Maps" ? "google" : "gsi";
+                EditorPrefs.SetString(Prefs + "mapProvider", mapProvider);
+                ResetMapTiles();
+            });
+            UpdateMapSource();
             Q<Button>("search-button").clicked += Search;
             Q<Button>("preview").clicked += Preview;
             Q<Button>("apply-bounds").clicked += ApplyBounds;
@@ -782,6 +822,229 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             neededTileKeys = needed;
             foreach (var key in missing) EnsureTileRequest(key);
             RefreshOverlay();
+            ScheduleAttributionUpdate();
+        }
+
+        private bool UseGoogle => mapProvider == "google";
+        private string GoogleApiKey => Q<TextField>("google-api-key").value.Trim();
+
+        private void ResetMapTiles()
+        {
+            foreach (var request in tileRequests.Values) request.Cancellation.Cancel();
+            tileRequests.Clear();
+            foreach (var texture in tileTextures.Values)
+                if (texture != null) DestroyImmediate(texture);
+            tileTextures.Clear();
+            CancelAttribution();
+            // Pending Google requests belong to the previous source and must not delay the next one.
+            CancelGoogleSession();
+            UpdateMapSource();
+            RefreshMap();
+        }
+
+        private void InitializeGoogleControls()
+        {
+            if (googleControlsInitialized) return;
+            googleControlsInitialized = true;
+            var savedMapType = EditorPrefs.GetString(Prefs + "googleMapType", "roadmap");
+            googleMapType = GoogleMapTiles.MapTypes.Any(type => type.Code == savedMapType) ? savedMapType : "roadmap";
+            var mapType = Q<DropdownField>("google-map-type");
+            mapType.choices = GoogleMapTiles.MapTypes.Select(type => type.Label).ToList();
+            mapType.SetValueWithoutNotify(GoogleMapTiles.MapTypes.First(type => type.Code == googleMapType).Label);
+            mapType.RegisterValueChangedCallback(e =>
+            {
+                googleMapType = GoogleMapTiles.MapTypes.First(type => type.Label == e.newValue).Code;
+                EditorPrefs.SetString(Prefs + "googleMapType", googleMapType);
+                ResetMapTiles();
+            });
+            var apiKey = Q<TextField>("google-api-key");
+            apiKey.SetValueWithoutNotify(EditorPrefs.GetString(Prefs + "googleApiKey", ""));
+            apiKey.RegisterValueChangedCallback(e =>
+            {
+                EditorPrefs.SetString(Prefs + "googleApiKey", e.newValue);
+                if (UseGoogle) ResetMapTiles();
+            });
+        }
+
+        private void CancelGoogleSession()
+        {
+            googleSessionIdentity = null;
+            googleSessionTask = null;
+            googleCancellation?.Cancel();
+            googleCancellation?.Dispose();
+            googleCancellation = null;
+        }
+
+        private void UpdateMapSource()
+        {
+            if (UseGoogle) InitializeGoogleControls();
+            Q<Label>("map-source-label").text = UseGoogle ? "地図: Google Maps" : "地図: 地理院タイル（国土地理院）";
+            Q<Button>("map-source-link").text = UseGoogle ? "Google Maps 利用規約" : "地理院タイル一覧";
+            Q<DropdownField>("google-map-type").style.display = UseGoogle ? DisplayStyle.Flex : DisplayStyle.None;
+            googleLogo.style.display = UseGoogle ? DisplayStyle.Flex : DisplayStyle.None;
+            Q<TextField>("google-api-key").style.display = UseGoogle ? DisplayStyle.Flex : DisplayStyle.None;
+            if (UseGoogle)
+            {
+                // The outlined logo keeps contrast on busy tiles: dark outline for imagery, light outline otherwise.
+                googleLogo.style.backgroundImage = new StyleBackground(AssetDatabase.LoadAssetAtPath<Texture2D>(
+                    PackagePath + (googleMapType == "satellite"
+                        ? "GoogleMaps_Logo_WithDarkOutline_2x.png"
+                        : "GoogleMaps_Logo_WithLightOutline_2x.png")));
+            }
+            else googleLogo.style.backgroundImage = StyleKeyword.None;
+            tiles.style.visibility = UseGoogle ? Visibility.Hidden : Visibility.Visible;
+            mapAttribution.EnableInClassList("google-attribution", UseGoogle);
+            SetMapAttribution(UseGoogle ? "" : "地理院タイル（国土地理院）");
+            ShowMapMessage(UseGoogle && string.IsNullOrEmpty(GoogleApiKey)
+                ? "Google Maps を表示するには、接続先の「Google Maps API キー」を設定してください。"
+                : null);
+        }
+
+        private void SetMapAttribution(string text)
+        {
+            mapAttribution.text = text;
+            mapAttribution.style.display = string.IsNullOrEmpty(text) ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
+        private void ShowMapMessage(string text)
+        {
+            mapMessage.text = text ?? "";
+            mapMessage.style.display = string.IsNullOrEmpty(text) ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
+        private Task<GoogleTileSession> EnsureGoogleSessionAsync()
+        {
+            var apiKey = GoogleApiKey;
+            if (string.IsNullOrEmpty(apiKey)) throw new InvalidOperationException("Google Maps API key is not set.");
+            var identity = googleMapType + "\n" + apiKey;
+            var now = DateTimeOffset.UtcNow;
+            if (googleSessionTask != null && googleSessionIdentity == identity &&
+                (!googleSessionTask.IsCompleted ||
+                 (googleSessionTask.IsCompletedSuccessfully
+                     ? GoogleMapTiles.IsUsable(googleSessionTask.Result, now)
+                     : !GoogleMapTiles.CanRetry(googleSessionFailedAt, now))))
+                return googleSessionTask;
+            googleSessionIdentity = identity;
+            if (googleCancellation == null) googleCancellation = new CancellationTokenSource();
+            googleSessionTask = CreateGoogleSessionAsync(googleMapType, apiKey, identity, googleCancellation.Token);
+            return googleSessionTask;
+        }
+
+        private async Task<GoogleTileSession> CreateGoogleSessionAsync(string mapType, string apiKey, string identity,
+            CancellationToken token)
+        {
+            try
+            {
+                var session = await (CreateGoogleSession ?? PlateauApi.CreateGoogleSessionAsync)(mapType, apiKey, token);
+                if (googleSessionIdentity == identity && !token.IsCancellationRequested)
+                {
+                    ShowMapMessage(null);
+                    ScheduleAttributionUpdate();
+                }
+                return session;
+            }
+            catch (Exception error)
+            {
+                if (googleSessionIdentity == identity && !token.IsCancellationRequested)
+                {
+                    googleSessionFailedAt = DateTimeOffset.UtcNow;
+                    ShowMapMessage("Google Maps のタイルを取得できませんでした: " + error.Message +
+                                   "。API キーと Map Tiles API の有効化を確認してください。地図を動かすと再試行します。");
+                }
+                throw;
+            }
+        }
+
+        private void CancelAttribution()
+        {
+            attributionGeneration++;
+            attributionUpdate?.Pause();
+            attributionUpdateScheduled = false;
+            attributionCancellation?.Cancel();
+            attributionCancellation?.Dispose();
+            attributionCancellation = null;
+            attributionViewportUrl = null;
+            attributionReady = false;
+        }
+
+        private void ScheduleAttributionUpdate()
+        {
+            if (!UseGoogle || map == null) return;
+            var task = googleSessionTask;
+            string url = null;
+            if (task != null && task.IsCompletedSuccessfully && map.contentRect.width > 0 && map.contentRect.height > 0)
+            {
+                var northWest = ScreenToGeo(Vector2.zero);
+                var southEast = ScreenToGeo(new Vector2(map.contentRect.width, map.contentRect.height));
+                url = GoogleMapTiles.ViewportUrl(task.Result.session, GoogleApiKey, MapZoomMath.TileZoom(zoom),
+                    Math.Max(-180, northWest.longitude), southEast.latitude,
+                    Math.Min(180, southEast.longitude), northWest.latitude);
+            }
+            if (url != attributionViewportUrl)
+            {
+                CancelAttribution();
+                attributionViewportUrl = url;
+                if (url != null)
+                    attributionCancellation = CancellationTokenSource.CreateLinkedTokenSource(googleCancellation.Token);
+                SetMapAttribution("");
+            }
+            tiles.style.visibility = attributionReady ? Visibility.Visible : Visibility.Hidden;
+            if (url == null || attributionReady || attributionRequestPending || attributionUpdateScheduled) return;
+            QueueAttributionUpdate(500);
+        }
+
+        private void QueueAttributionUpdate(long delayMilliseconds)
+        {
+            attributionUpdateScheduled = true;
+            attributionUpdate = map.schedule.Execute(() =>
+            {
+                attributionUpdateScheduled = false;
+                UpdateAttribution();
+            }).StartingIn(delayMilliseconds);
+        }
+
+        private async void UpdateAttribution()
+        {
+            var task = googleSessionTask;
+            var url = attributionViewportUrl;
+            if (!UseGoogle || task == null || !task.IsCompletedSuccessfully || url == null ||
+                attributionReady || attributionRequestPending || attributionCancellation == null) return;
+            var generation = attributionGeneration;
+            var token = attributionCancellation.Token;
+            attributionRequestPending = true;
+            var retry = false;
+            try
+            {
+                var copyright = await (FetchGoogleCopyright ?? PlateauApi.GetGoogleCopyrightAsync)(url, token);
+                if (string.IsNullOrWhiteSpace(copyright)) throw new InvalidOperationException("Viewport response omitted copyright.");
+                if (UseGoogle && generation == attributionGeneration && task == googleSessionTask && !token.IsCancellationRequested)
+                {
+                    SetMapAttribution(copyright);
+                    attributionReady = true;
+                    tiles.style.visibility = Visibility.Visible;
+                    ShowMapMessage(null);
+                }
+            }
+            catch (Exception)
+            {
+                if (UseGoogle && generation == attributionGeneration && task == googleSessionTask && !token.IsCancellationRequested)
+                {
+                    SetMapAttribution("");
+                    tiles.style.visibility = Visibility.Hidden;
+                    ShowMapMessage("Google Maps の著作権情報を取得できませんでした。地図を非表示にして再試行します。");
+                    retry = true;
+                }
+            }
+            finally
+            {
+                attributionRequestPending = false;
+                if (UseGoogle && map != null && map.panel != null && !attributionReady)
+                {
+                    if (retry && generation == attributionGeneration)
+                        QueueAttributionUpdate(2000);
+                    else ScheduleAttributionUpdate();
+                }
+            }
         }
 
         private void ShowFallbackTile(VisualElement visual, int tileZoom, int tileX, int tileY, double tileSize)
@@ -842,12 +1105,15 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         {
             try
             {
+                // Wait for the session before taking a slot so a slow session cannot block other tiles.
+                var url = UseGoogle
+                    ? GoogleMapTiles.TileUrl(key, (await EnsureGoogleSessionAsync()).session, GoogleApiKey)
+                    : Q<TextField>("tiles-url").value.TrimEnd('/') + "/" + key + ".png";
                 await tileDownloadSlots.WaitAsync(request.Cancellation.Token);
                 byte[] bytes;
                 try
                 {
-                    var url = Q<TextField>("tiles-url").value.TrimEnd('/') + "/" + key + ".png";
-                    bytes = await PlateauApi.GetTileAsync(url, request.Cancellation.Token);
+                    bytes = await FetchTile(url, request.Cancellation.Token);
                 }
                 finally { tileDownloadSlots.Release(); }
                 if (request.Cancellation.IsCancellationRequested || !neededTileKeys.Contains(key)) return;

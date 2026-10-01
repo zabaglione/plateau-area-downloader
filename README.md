@@ -69,6 +69,8 @@ https://github.com/zabaglione/plateau-area-downloader.git#v0.1.2
 
 地図をドラッグして移動し、ホイールまたはトラックパッドの縦スクロールで拡大縮小します。「拡大縮小の速さ」は同じ端末の Unity Editor 設定に保存されます。**Shift＋ドラッグ**で青い指定範囲を描きます。経緯度を直接入力したときは「反映」を押してください。
 
+背景地図は既定で地理院タイルです。「表示する地図」で Google Maps（道路地図・航空写真・地形）に切り替えられます。Google Maps を使うには、Google Cloud で課金を有効にしたプロジェクトの [Map Tiles API](https://developers.google.com/maps/documentation/tile) を有効化し、その API キーを「接続先」の「Google Maps API キー」に入力します。タイル取得には Google の料金がかかります。キーは同じ端末の Unity Editor 設定に平文で保存され、プロジェクトには保存されません。
+
 地図の右側（狭いウィンドウでは下側）の「検索するデータ種別」で対象を選び、「CityGMLファイルを検索」を押します。紫色の番号付き枠は詳細区画、薄紫色の枠は広域区画です。地図に表示する区画は最大 100 件ですが、検索結果には全体の区画数とファイル数が表示されます。区画はおおむね約 1 km 単位の地域メッシュです。
 
 ![広い範囲の検索結果。15件のCityGMLファイルが見つかった状態](Documentation~/media/wide-range-results.png)

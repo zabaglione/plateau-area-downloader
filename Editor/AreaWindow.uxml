@@ -21,7 +21,9 @@
         <ui:Label name="zoom-sensitivity-value" text="100%" />
       </ui:VisualElement>
       <ui:VisualElement class="row map-source">
-        <ui:Label text="地図: 地理院タイル（国土地理院）" />
+        <ui:DropdownField name="map-provider" label="表示する地図" />
+        <ui:DropdownField name="google-map-type" />
+        <ui:Label name="map-source-label" text="地図: 地理院タイル（国土地理院）" />
         <ui:Button name="map-source-link" text="地理院タイル一覧" />
       </ui:VisualElement>
       <ui:VisualElement class="map-workspace">
@@ -30,7 +32,9 @@
             <ui:VisualElement name="tiles" class="map-layer" />
             <ui:VisualElement name="mesh-overlay" class="map-layer" />
             <ui:VisualElement name="bounds-overlay" class="map-layer" />
-            <ui:Label text="地理院タイル（国土地理院）" class="attribution" />
+            <ui:VisualElement name="google-logo" class="google-logo" />
+            <ui:Label name="map-message" class="map-message" />
+            <ui:Label name="map-attribution" text="地理院タイル（国土地理院）" class="attribution" />
           </ui:VisualElement>
           <ui:Label name="map-legend" text="青: 指定範囲　紫: 取得対象の区画（照会後に表示）" class="map-legend" />
         </ui:VisualElement>
@@ -87,6 +91,7 @@
       <ui:TextField name="photon-url" label="Photon" />
       <ui:TextField name="api-url" label="CityGML API" />
       <ui:TextField name="tiles-url" label="地図タイル" />
+      <ui:TextField name="google-api-key" label="Google Maps API キー" password="true" is-delayed="true" />
     </ui:VisualElement>
   </ui:ScrollView>
 </ui:UXML>

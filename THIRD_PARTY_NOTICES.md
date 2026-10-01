@@ -8,6 +8,8 @@
 | PLATEAU 配信サービス・CityGML | データ検索・取得 | [配信サービスの説明](https://docs.plateauview.mlit.go.jp/intro/)、[PLATEAU サイトポリシー](https://www.mlit.go.jp/plateau/site-policy/)。都市モデルの権利者・条件・必要な出典は対象データセットごとに確認してください。 |
 | 3D都市モデル（Project PLATEAU）港区（2025年度） | Scene View と Game View の掲載画像で Unity 上に可視化 | [データセット](https://www.geospatial.jp/ckan/dataset/plateau-13103-minato-ku-2025)。取得したデータセットの README に列挙されたライセンスから [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) を選択。元の CityGML は本リポジトリに含めません。 |
 | 地理院タイル | 地図表示時にオンライン取得。利用手順の画面画像・動画にも映り込みます | [地理院タイル一覧・利用案内](https://maps.gsi.go.jp/development/ichiran.html)、[出典の記載](https://www.gsi.go.jp/LAW/2930-meizi.html)。画面と資料に「地理院タイル（国土地理院）」を表示します。 |
+| Google Maps Platform（Map Tiles API） | 利用者が「表示する地図」で選び、自身の API キーを設定した場合だけ地図タイルをオンライン取得します。取得したタイルは表示中の Unity Editor のメモリにだけ保持します | [Google Maps Platform 利用規約](https://cloud.google.com/maps-platform/terms)、[Map Tiles API のポリシー](https://developers.google.com/maps/documentation/tile/policies)。料金と規約の遵守は API キーの所有者が負います。表示中は Google Maps ロゴと API から取得した著作権表記を地図上に表示します。 |
+| Google Maps ロゴ | `Editor/GoogleMaps_Logo_WithLightOutline_2x.png`、`Editor/GoogleMaps_Logo_WithDarkOutline_2x.png` を同梱し、Google Maps 表示中の帰属表示にだけ使用 | [Google 配布の帰属表示素材](https://developers.google.com/static/maps/documentation/images/Google_Maps_Attribution_Assets.zip)を無加工で同梱。Google の商標であり、本リポジトリの MIT ライセンスは適用されません。 |
 | Photon | 施設名の検索にオンライン API を利用 | [Photon API と利用条件](https://photon.komoot.io/)、[Photon のライセンス](https://github.com/komoot/photon#license)。公開サーバーの可用性は保証されず、多量の利用は制限されます。 |
 | OpenStreetMap | Photon の検索データの出典 | [© OpenStreetMap contributors](https://www.openstreetmap.org/copyright)。検索結果やその画像を再利用する場合も出典を維持してください。 |
 

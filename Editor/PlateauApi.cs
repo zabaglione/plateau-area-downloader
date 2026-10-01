@@ -235,12 +235,85 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             return JsonUtility.FromJson<PackStatus>(json) ?? throw new InvalidOperationException("Invalid pack status.");
         }
 
-        internal static async Task<byte[]> GetTileAsync(string url, CancellationToken token)
+        internal static Task<byte[]> GetTileAsync(string url, CancellationToken token) =>
+            GetTileAsync(url, token, Client);
+
+        internal static async Task<byte[]> GetTileAsync(string url, CancellationToken token, HttpClient client)
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+                response.EnsureSuccessStatusCode();
+                // Disposing the response also interrupts transports whose body read ignores cancellation.
+                using var cancellation = timeout.Token.Register(response.Dispose);
+                using var stream = await response.Content.ReadAsStreamAsync();
+                using var output = new System.IO.MemoryStream();
+                var buffer = new byte[81920];
+                int count;
+                while ((count = await stream.ReadAsync(buffer, 0, buffer.Length, timeout.Token)) != 0)
+                    output.Write(buffer, 0, count);
+                timeout.Token.ThrowIfCancellationRequested();
+                return output.ToArray();
+            }
+            catch (Exception) when (timeout.IsCancellationRequested)
+            {
+                token.ThrowIfCancellationRequested();
+                throw new TimeoutException("Tile request timed out after 15 seconds");
+            }
+        }
+
+        internal static async Task<GoogleTileSession> CreateGoogleSessionAsync(
+            string mapType, string apiKey, CancellationToken token)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post,
+                GoogleMapTiles.Base + "/v1/createSession?key=" + Uri.EscapeDataString(apiKey));
+            request.Content = new StringContent(GoogleMapTiles.SessionRequestJson(mapType),
+                Encoding.UTF8, "application/json");
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(GoogleMapTiles.SessionTimeout);
+            string body;
+            try { body = await SendGoogleAsync(request, timeout.Token); }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
+            {
+                throw new TimeoutException("Session request timed out after " +
+                                           GoogleMapTiles.SessionTimeout.TotalSeconds + " seconds");
+            }
+            var session = JsonUtility.FromJson<GoogleTileSession>(body);
+            if (string.IsNullOrEmpty(session?.session)) throw new InvalidOperationException("Invalid session response.");
+            return session;
+        }
+
+        internal static async Task<string> GetGoogleCopyrightAsync(string url, CancellationToken token)
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            try
+            {
+                return JsonUtility.FromJson<GoogleViewportInfo>(await SendGoogleAsync(url, timeout.Token))?.copyright ?? "";
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
+            {
+                throw new TimeoutException("Viewport request timed out after 15 seconds");
+            }
+        }
+
+        private static async Task<string> SendGoogleAsync(string url, CancellationToken token)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            using var response = await Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
-            response.EnsureSuccessStatusCode();
-            return await response.Content.ReadAsByteArrayAsync();
+            return await SendGoogleAsync(request, token);
+        }
+
+        // Errors omit the URL so the API key never reaches the UI or logs.
+        private static async Task<string> SendGoogleAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            using var response = await Client.SendAsync(request, token);
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+                throw new HttpRequestException("HTTP " + (int)response.StatusCode + " " + GoogleMapTiles.ErrorMessage(body));
+            return body;
         }
 
         private static async Task<string> GetStringAsync(string url, CancellationToken token)
