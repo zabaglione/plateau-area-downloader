@@ -235,12 +235,34 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             return JsonUtility.FromJson<PackStatus>(json) ?? throw new InvalidOperationException("Invalid pack status.");
         }
 
-        internal static async Task<byte[]> GetTileAsync(string url, CancellationToken token)
+        internal static Task<byte[]> GetTileAsync(string url, CancellationToken token) =>
+            GetTileAsync(url, token, Client);
+
+        internal static async Task<byte[]> GetTileAsync(string url, CancellationToken token, HttpClient client)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            using var response = await Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
-            response.EnsureSuccessStatusCode();
-            return await response.Content.ReadAsByteArrayAsync();
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+                response.EnsureSuccessStatusCode();
+                // Disposing the response also interrupts transports whose body read ignores cancellation.
+                using var cancellation = timeout.Token.Register(response.Dispose);
+                using var stream = await response.Content.ReadAsStreamAsync();
+                using var output = new System.IO.MemoryStream();
+                var buffer = new byte[81920];
+                int count;
+                while ((count = await stream.ReadAsync(buffer, 0, buffer.Length, timeout.Token)) != 0)
+                    output.Write(buffer, 0, count);
+                timeout.Token.ThrowIfCancellationRequested();
+                return output.ToArray();
+            }
+            catch (Exception) when (timeout.IsCancellationRequested)
+            {
+                token.ThrowIfCancellationRequested();
+                throw new TimeoutException("Tile request timed out after 15 seconds");
+            }
         }
 
         internal static async Task<GoogleTileSession> CreateGoogleSessionAsync(
@@ -266,8 +288,22 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
 
         internal static async Task<string> GetGoogleCopyrightAsync(string url, CancellationToken token)
         {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            try
+            {
+                return JsonUtility.FromJson<GoogleViewportInfo>(await SendGoogleAsync(url, timeout.Token))?.copyright ?? "";
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
+            {
+                throw new TimeoutException("Viewport request timed out after 15 seconds");
+            }
+        }
+
+        private static async Task<string> SendGoogleAsync(string url, CancellationToken token)
+        {
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            return JsonUtility.FromJson<GoogleViewportInfo>(await SendGoogleAsync(request, token))?.copyright ?? "";
+            return await SendGoogleAsync(request, token);
         }
 
         // Errors omit the URL so the API key never reaches the UI or logs.
